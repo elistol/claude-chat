@@ -1,6 +1,5 @@
 import os
 import re
-import json
 from dotenv import load_dotenv
 from anthropic import Anthropic
 
@@ -8,7 +7,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.table import Table
-from rich.text import Text
 from rich.live import Live
 
 from prompt_toolkit import prompt
@@ -19,14 +17,15 @@ from prompt_toolkit.formatted_text import HTML
 
 from chat.themes import THEMES
 from chat.completer import ChatCompleter
+from chat.display import DisplayMixin
 from chat.voice import VoiceMixin
 from chat.storage import StorageMixin
 from chat.web import WebMixin
 
 
-class ClaudeChat(VoiceMixin, StorageMixin, WebMixin):
+class ClaudeChat(DisplayMixin, VoiceMixin, StorageMixin, WebMixin):
     """
-    The main chatbot class. Inherits voice, storage, and web features from mixins.
+    The main chatbot class. Inherits display, voice, storage, and web from mixins.
     Features: model switching, brain modes, streaming, system prompts,
     token tracking, save/load conversations, themes, Rich UI, Prompt Toolkit input.
     """
@@ -44,15 +43,52 @@ class ClaudeChat(VoiceMixin, StorageMixin, WebMixin):
 
         load_dotenv()
         self.console = Console()
+        self.project_root = os.path.dirname(os.path.dirname(__file__))
 
         api_key = os.getenv('api_key')
         if not api_key:
-            self._print_error("API key not found. Make sure 'api_key' is set in your .env file.")
+            self.console.print(Panel(
+                "[bold red]API key not found[/bold red]\n\n"
+                "[dim]1. Create a [bold].env[/bold] file in the project root\n"
+                "2. Add this line:[/dim]  [bold]api_key=sk-ant-your-key-here[/bold]\n"
+                "[dim]3. Get a key at:[/dim]  [bold cyan]https://console.anthropic.com/[/bold cyan]",
+                title="[red]Setup Required[/red]",
+                border_style="red",
+                padding=(1, 2),
+            ))
             exit(1)
         self.client = Anthropic(api_key=api_key)
         self.conversation = []
         self.system_prompt = ""
-        self.base_instructions = "Never start your response with a title or heading. Jump straight into the answer."
+        self.base_instructions = (
+            "Never start your response with a title or heading. Jump straight into the answer.\n\n"
+            "IMPORTANT: You are running inside 'Claude Chat', a feature-rich terminal chatbot. "
+            "You are NOT running in a browser or API playground. "
+            "When the user asks about your capabilities, how to do something, or asks for help, "
+            "you MUST answer based on the actual features of this app listed below. "
+            "Do NOT give generic answers about what Claude can or can't do — "
+            "answer based on what THIS app supports:\n\n"
+            "FEATURES THE USER CAN USE (type these as their message):\n"
+            "- switch_model → change between Opus, Sonnet, and Haiku models\n"
+            "- brain → change response depth (128 to 4096 tokens)\n"
+            "- persona → pick a personality preset or write a custom system prompt\n"
+            "- theme → switch between 6 color themes (Ocean, Sunset, Forest, Neon, Monochrome, Dracula)\n"
+            "- voice → speak a message into the mic and hear the reply read aloud (Windows only)\n"
+            "- voice_settings → pick a TTS voice and adjust speed\n"
+            "- search → search the web via DuckDuckGo, results are fed to you as context\n"
+            "- save → save the conversation to a JSON file\n"
+            "- load → load a previously saved conversation\n"
+            "- export → export the chat as a readable Markdown file\n"
+            "- clear → clear the conversation history and start fresh\n"
+            "- help → show the animated help panel with all commands\n"
+            "- @file <path> → attach a local file (e.g. '@file chat/app.py explain this'). "
+            "The file contents are sent to you so you can read, review, explain, or debug code\n"
+            '- """ → enter multi-line input mode for pasting code blocks or long text\n'
+            "- quit / exit / q → exit with a session summary showing tokens and cost\n\n"
+            "The user's preferences (model, brain mode, theme) are saved automatically between sessions. "
+            "When asked about files, sharing code, uploading, etc. — always mention the @file command. "
+            "When asked about searching — always mention the search command or trigger phrases."
+        )
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.total_cost = 0.0
@@ -81,8 +117,11 @@ class ClaudeChat(VoiceMixin, StorageMixin, WebMixin):
         self.brain_name, self.max_tokens = self.brain_modes["3"]
 
         # Load saved preferences (overrides defaults if config exists)
-        self.config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json")
+        self.config_path = os.path.join(self.project_root, "config.json")
         self._load_config()
+
+        # Paths
+        self.save_dir = os.path.join(self.project_root, "saved_chats")
 
         # Voice (from VoiceMixin)
         self._init_voice()
@@ -102,8 +141,6 @@ class ClaudeChat(VoiceMixin, StorageMixin, WebMixin):
             "help": self.show_help,
         }
 
-        self.save_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "saved_chats")
-
         # --- PROMPT TOOLKIT SETUP ---
         self.history = InMemoryHistory()
         self.completer = ChatCompleter()
@@ -118,36 +155,6 @@ class ClaudeChat(VoiceMixin, StorageMixin, WebMixin):
             "bottom-toolbar.text": f"bg:{self.theme['toolbar_bg']} {self.theme['toolbar_fg']}",
         })
 
-    def _load_config(self):
-        """Loads saved preferences from config.json if it exists."""
-        try:
-            with open(self.config_path, "r") as f:
-                cfg = json.load(f)
-            # Restore model
-            model_key = cfg.get("model", "")
-            if model_key in self.models:
-                self.model_name, self.model_id = self.models[model_key]
-            # Restore brain
-            brain_key = cfg.get("brain", "")
-            if brain_key in self.brain_modes:
-                self.brain_name, self.max_tokens = self.brain_modes[brain_key]
-            # Restore theme
-            theme_key = cfg.get("theme", "")
-            if theme_key in THEMES:
-                self.theme_key = theme_key
-                self.theme = THEMES[theme_key]
-        except (FileNotFoundError, json.JSONDecodeError):
-            pass  # first launch — use defaults
-
-    def _save_config(self):
-        """Saves current preferences to config.json."""
-        # Find the model/brain keys from current values
-        model_key = next((k for k, v in self.models.items() if v[0] == self.model_name), "2")
-        brain_key = next((k for k, v in self.brain_modes.items() if v[0] == self.brain_name), "3")
-        cfg = {"model": model_key, "brain": brain_key, "theme": self.theme_key}
-        with open(self.config_path, "w") as f:
-            json.dump(cfg, f)
-
     # --- THEME HELPERS ---
 
     def _c(self, text, color_key="primary"):
@@ -160,11 +167,7 @@ class ClaudeChat(VoiceMixin, StorageMixin, WebMixin):
         color = self.theme[color_key]
         return f"[bold {color}]{text}[/bold {color}]"
 
-    # --- PRETTY OUTPUT HELPERS ---
-
-    def _print_error(self, message):
-        """Prints an error message in red."""
-        self.console.print(f"[bold red]Error:[/bold red] {message}")
+    # --- STATUS & INPUT ---
 
     def _print_status(self):
         """Prints current settings in a neat colored line."""
@@ -248,7 +251,7 @@ class ClaudeChat(VoiceMixin, StorageMixin, WebMixin):
             complete_while_typing=True,
         )
 
-    # --- SETTINGS METHODS ---
+    # --- SETTINGS PICKERS ---
 
     def pick_model(self):
         """Asks the user to choose a model with a pretty table."""
@@ -375,12 +378,14 @@ class ClaudeChat(VoiceMixin, StorageMixin, WebMixin):
         self.console.print(table)
 
         while True:
-            choice = self._get_input(f"Enter 1-{len(self.PERSONA_PRESETS)} > ").strip()
+            choice = self._get_input(f"Enter 1-{len(self.PERSONA_PRESETS)} (or empty to cancel) > ").strip()
+            if not choice:
+                self.console.print("  [dim]Cancelled, keeping current persona.[/dim]")
+                return
             if choice in self.PERSONA_PRESETS:
                 name, prompt_text = self.PERSONA_PRESETS[choice]
 
                 if prompt_text is None:
-                    # Custom persona
                     custom = self._get_input("Enter your custom persona > ").strip()
                     if custom:
                         self.system_prompt = custom
@@ -397,73 +402,7 @@ class ClaudeChat(VoiceMixin, StorageMixin, WebMixin):
             else:
                 self.console.print(f"  [{self.theme['error']}]Invalid choice. Enter 1-{len(self.PERSONA_PRESETS)}.[/{self.theme['error']}]")
 
-    HELP_COMMANDS = [
-        ("switch_model",   "  - change the AI model"),
-        ("brain",          "         - change response depth"),
-        ("persona",        "      - set Claude's personality"),
-        ("theme",          "        - change color theme"),
-        ("voice",          "        - speak one message & hear reply"),
-        ("voice_settings", " - pick voice & speed"),
-        ("search",         "       - search the web & ask Claude"),
-        ("clear",          "        - start fresh conversation"),
-        ("save",           "         - save conversation to file"),
-        ("load",           "         - load a saved conversation"),
-        ("export",         "       - export chat as markdown"),
-        ("help",           "         - show this help panel"),
-        ("@file <path>",   " - send a file to Claude"),
-        ('"""',            "          - multi-line input mode"),
-        ("quit/exit/q",    "   - exit the chat"),
-    ]
-
-    @staticmethod
-    def _hue_to_rgb(h):
-        """Converts a hue (0.0-1.0) to an RGB tuple. Full saturation, high brightness."""
-        h6 = h * 6.0
-        x = int(255 * (1 - abs(h6 % 2 - 1)))
-        sector = int(h6) % 6
-        return [
-            (255, x, 0), (x, 255, 0), (0, 255, x),
-            (0, x, 255), (x, 0, 255), (255, 0, x),
-        ][sector]
-
-    def _build_help_panel(self, offset=0.0):
-        """Builds the help panel with rainbow colors shifted by offset."""
-        help_text = Text()
-        help_text.append("Magic words:\n", style="bold")
-
-        for cmd_i, (name, desc) in enumerate(self.HELP_COMMANDS):
-            help_text.append("  ")
-            for char_i, char in enumerate(name):
-                hue = (cmd_i / len(self.HELP_COMMANDS) + char_i * 0.03 + offset) % 1.0
-                r, g, b = self._hue_to_rgb(hue)
-                help_text.append(char, style=f"bold #{r:02x}{g:02x}{b:02x}")
-            help_text.append(f"{desc}\n", style="dim")
-
-        help_text.append("\n")
-        help_text.append("Tips: ", style="bold")
-        help_text.append("Press ", style="dim")
-        for i, c in enumerate("Tab"):
-            hue = (0.4 + i * 0.05 + offset) % 1.0
-            r, g, b = self._hue_to_rgb(hue)
-            help_text.append(c, style=f"bold #{r:02x}{g:02x}{b:02x}")
-        help_text.append(" for autocomplete, ", style="dim")
-        for i, c in enumerate("Up Arrow"):
-            hue = (0.6 + i * 0.04 + offset) % 1.0
-            r, g, b = self._hue_to_rgb(hue)
-            help_text.append(c, style=f"bold #{r:02x}{g:02x}{b:02x}")
-        help_text.append(" for message history", style="dim")
-
-        return Panel(help_text, title="Help", title_align="left", border_style=self.theme["success"])
-
-    def show_help(self):
-        """Shows the help panel with live animated rainbow colors."""
-        import time
-        frames = 60  # ~3 seconds at 20fps
-        with Live(self._build_help_panel(0), console=self.console, refresh_per_second=20) as live:
-            for frame in range(frames):
-                offset = frame / 40
-                live.update(self._build_help_panel(offset))
-                time.sleep(0.05)
+    # --- COMMANDS ---
 
     def do_search(self):
         """Prompts for a search query, searches the web, and sends results to Claude."""
@@ -480,18 +419,16 @@ class ClaudeChat(VoiceMixin, StorageMixin, WebMixin):
             f"[dim]({msg_count} exchanges removed)[/dim]"
         )
 
-    # --- CHAT METHODS ---
+    # --- CHAT ENGINE ---
 
     def _trim_conversation(self):
         """Trims oldest message pairs if approaching the context limit."""
         if self.last_input_tokens < self.context_limit * 0.85:
-            return  # plenty of room
+            return
 
         trimmed = 0
-        # Remove oldest pairs (always 2 at a time: user + assistant) until we've cut ~30%
         target = int(len(self.conversation) * 0.7)
         while len(self.conversation) > target and len(self.conversation) > 2:
-            # Only trim if we have a proper pair at the front
             if (len(self.conversation) >= 2
                     and self.conversation[0]["role"] == "user"
                     and self.conversation[1]["role"] == "assistant"):
@@ -499,13 +436,10 @@ class ClaudeChat(VoiceMixin, StorageMixin, WebMixin):
                 self.conversation.pop(0)
                 trimmed += 1
             else:
-                break  # conversation structure is unexpected, stop trimming
+                break
 
         if trimmed:
-            self.console.print(
-                f"  [{self.theme['warning']}]Memory trimmed: removed {trimmed} oldest exchanges "
-                f"to stay within context limit.[/{self.theme['warning']}]"
-            )
+            self._print_warning(f"Memory trimmed: removed {trimmed} oldest exchanges to stay within context limit.")
 
     def send_message(self, user_msg, api_msg=None):
         """Sends a message to Claude using streaming.
@@ -515,7 +449,6 @@ class ClaudeChat(VoiceMixin, StorageMixin, WebMixin):
         self._trim_conversation()
         self.conversation.append({"role": "user", "content": user_msg})
 
-        # Build messages list — swap in api_msg for the last user message if provided
         if api_msg:
             messages = self.conversation[:-1] + [{"role": "user", "content": api_msg}]
         else:
@@ -527,7 +460,6 @@ class ClaudeChat(VoiceMixin, StorageMixin, WebMixin):
                 "max_tokens": self.max_tokens,
                 "messages": messages,
             }
-            # Always include base instructions; append persona if set
             system = self.base_instructions
             if self.system_prompt:
                 system += "\n\n" + self.system_prompt
@@ -569,7 +501,17 @@ class ClaudeChat(VoiceMixin, StorageMixin, WebMixin):
                 self.voice_mode = False
 
         except Exception as e:
-            self._print_error(str(e))
+            error_str = str(e).lower()
+            if "401" in error_str or "authentication" in error_str:
+                self._print_error("Invalid API key", "Check your .env file — the key may be expired or incorrect.")
+            elif "429" in error_str or "rate" in error_str:
+                self._print_error("Rate limited", "Too many requests — wait a moment and try again.")
+            elif "overloaded" in error_str or "529" in error_str:
+                self._print_error("Claude is overloaded", "The API is busy right now — try again in a few seconds.")
+            elif "connection" in error_str or "timeout" in error_str:
+                self._print_error("Connection failed", "Check your internet connection and try again.")
+            else:
+                self._print_error("Something went wrong", f"Details: {e}")
             self.conversation.pop()
             self.voice_mode = False
 
@@ -611,23 +553,21 @@ class ClaudeChat(VoiceMixin, StorageMixin, WebMixin):
 
     def _read_files(self, file_paths):
         """Reads files and returns formatted context string. Shows UI feedback."""
-        project_root = os.path.dirname(os.path.dirname(__file__))
         context_parts = []
 
         for path in file_paths:
-            # Resolve relative paths from project root
             if not os.path.isabs(path):
-                full_path = os.path.join(project_root, path)
+                full_path = os.path.join(self.project_root, path)
             else:
                 full_path = path
 
             if not os.path.isfile(full_path):
-                self._print_error(f"File not found: {path}")
+                self._print_error(f"File not found: {path}", "Paths are relative to the project root. Example: @file chat/app.py")
                 continue
 
             size = os.path.getsize(full_path)
             if size > 100_000:
-                self.console.print(f"  [{self.theme['warning']}]Skipped {path} — too large ({size:,} bytes, max 100KB)[/{self.theme['warning']}]")
+                self._print_error(f"File too large: {path} ({size:,} bytes)", "Max file size is 100KB. Try a smaller file or split it up.")
                 continue
 
             try:
@@ -636,10 +576,16 @@ class ClaudeChat(VoiceMixin, StorageMixin, WebMixin):
                 line_count = content.count("\n") + 1
                 self.console.print(f"  {self._c('Loaded:', 'accent')} {self._b(path)} [dim]({line_count} lines)[/dim]")
                 context_parts.append(f"[File: {path} ({line_count} lines)]\n\n{content}")
+            except UnicodeDecodeError:
+                self._print_error(f"Can't read {path}", "This looks like a binary file. Only text files are supported.")
+            except PermissionError:
+                self._print_error(f"Access denied: {path}", "You don't have permission to read this file.")
             except Exception as e:
-                self._print_error(f"Could not read {path}: {e}")
+                self._print_error(f"Could not read {path}", str(e))
 
         return "\n\n---\n\n".join(context_parts) if context_parts else None
+
+    # --- INPUT DISPATCHER ---
 
     def handle_input(self, user_msg):
         """Decides what to do with the user's input."""
@@ -663,11 +609,10 @@ class ClaudeChat(VoiceMixin, StorageMixin, WebMixin):
                     augmented = f"{file_context}\n\n---\n\n{clean_msg or 'Explain this code.'}"
                     self.send_message(clean_msg or user_msg, api_msg=augmented)
                 else:
-                    # All files failed to load
                     if clean_msg:
                         self.send_message(clean_msg)
                     else:
-                        self.console.print(f"  [{self.theme['warning']}]No files loaded and no message to send.[/{self.theme['warning']}]")
+                        self._print_warning("No files loaded and no message to send.")
                 self._print_status()
                 return True
 
@@ -681,44 +626,14 @@ class ClaudeChat(VoiceMixin, StorageMixin, WebMixin):
 
     # --- MAIN LOOP ---
 
-    BANNER_LINES = [
-        r"   ██████╗██╗      █████╗ ██╗   ██╗██████╗ ███████╗",
-        r"  ██╔════╝██║     ██╔══██╗██║   ██║██╔══██╗██╔════╝",
-        r"  ██║     ██║     ███████║██║   ██║██║  ██║█████╗  ",
-        r"  ██║     ██║     ██╔══██║██║   ██║██║  ██║██╔══╝  ",
-        r"  ╚██████╗███████╗██║  ██║╚██████╔╝██████╔╝███████╗",
-        r"   ╚═════╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝",
-        r"",
-        r"    ██████╗██╗  ██╗ █████╗ ████████╗",
-        r"   ██╔════╝██║  ██║██╔══██╗╚══██╔══╝",
-        r"   ██║     ███████║███████║   ██║   ",
-        r"   ██║     ██╔══██║██╔══██║   ██║   ",
-        r"   ╚██████╗██║  ██║██║  ██║   ██║   ",
-        r"    ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ",
-    ]
-
-    def _print_banner(self):
-        """Prints a large Claude-orange banner on startup."""
-        banner = Text()
-        for line in self.BANNER_LINES:
-            for char in line:
-                if char == " ":
-                    banner.append(char)
-                else:
-                    banner.append(char, style="bold #E07A5F")
-            banner.append("\n")
-
-        self.console.print(Panel(
-            banner,
-            subtitle="[dim]Your AI assistant in the terminal[/dim]",
-            border_style="#E07A5F",
-            padding=(1, 4),
-        ))
-
     def run(self):
         """Starts the chatbot and enters the chat loop."""
 
-        os.system('cls' if os.name == 'nt' else 'clear')
+        try:
+            os.system('cls' if os.name == 'nt' else 'clear')
+        except Exception:
+            pass  # terminal clear failed — not critical
+
         self._print_banner()
         self.show_help()
         self._print_status()

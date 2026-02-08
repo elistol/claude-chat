@@ -84,7 +84,13 @@ class WebMixin:
             return "\n\n---\n\n".join(context_parts)
 
         except Exception as e:
-            self.console.print(f"  [{self.theme['error']}]Search failed: {e}[/{self.theme['error']}]")
+            error_str = str(e).lower()
+            if "connection" in error_str or "timeout" in error_str:
+                self._print_error("Web search failed", "Check your internet connection and try again.")
+            elif "ratelimit" in error_str or "429" in error_str:
+                self._print_error("Search rate limited", "Too many searches — wait a moment and try again.")
+            else:
+                self._print_error("Web search unavailable", "DuckDuckGo may be down. Your message will be sent without search results.")
             return None
 
     def send_with_search(self, user_msg):

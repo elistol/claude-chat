@@ -9,16 +9,50 @@ from chat.themes import THEMES
 
 class StorageMixin:
     """
-    Mixin that adds save/load conversation to ClaudeChat.
+    Mixin that handles all persistence for ClaudeChat.
+    Config preferences, conversation save/load, markdown export.
     Expects self.console, self.conversation, self.system_prompt,
     self.theme_key, self.theme, self.total_input_tokens, self.total_output_tokens,
     self._b(), self._get_input(), self._update_input_style()
     """
 
+    # --- CONFIG PERSISTENCE ---
+
+    def _load_config(self):
+        """Loads saved preferences from config.json if it exists."""
+        try:
+            with open(self.config_path, "r") as f:
+                cfg = json.load(f)
+            model_key = cfg.get("model", "")
+            if model_key in self.models:
+                self.model_name, self.model_id = self.models[model_key]
+            brain_key = cfg.get("brain", "")
+            if brain_key in self.brain_modes:
+                self.brain_name, self.max_tokens = self.brain_modes[brain_key]
+            theme_key = cfg.get("theme", "")
+            if theme_key in THEMES:
+                self.theme_key = theme_key
+                self.theme = THEMES[theme_key]
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass  # first launch — use defaults
+
+    def _save_config(self):
+        """Saves current preferences to config.json."""
+        model_key = next((k for k, v in self.models.items() if v[0] == self.model_name), "2")
+        brain_key = next((k for k, v in self.brain_modes.items() if v[0] == self.brain_name), "3")
+        cfg = {"model": model_key, "brain": brain_key, "theme": self.theme_key}
+        try:
+            with open(self.config_path, "w") as f:
+                json.dump(cfg, f)
+        except OSError:
+            pass  # non-critical — preferences just won't persist this time
+
+    # --- CONVERSATION SAVE/LOAD ---
+
     def save_conversation(self):
         """Saves the current conversation to a JSON file."""
         if not self.conversation:
-            self.console.print(f"  [{self.theme['warning']}]Nothing to save - conversation is empty.[/{self.theme['warning']}]")
+            self._print_warning("Nothing to save — conversation is empty.")
             return
 
         os.makedirs(self.save_dir, exist_ok=True)
@@ -39,15 +73,19 @@ class StorageMixin:
             "conversation": self.conversation,
         }
 
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(save_data, f, indent=2, ensure_ascii=False)
-
-        self.console.print(f"  {self._b('-> Saved to: ' + filename, 'success')}")
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(save_data, f, indent=2, ensure_ascii=False)
+            self.console.print(f"  {self._b('-> Saved to: ' + filename, 'success')}")
+        except PermissionError:
+            self._print_error("Can't save conversation", "Permission denied — check folder permissions for saved_chats/.")
+        except OSError as e:
+            self._print_error("Can't save conversation", f"Disk may be full or path invalid. Details: {e}")
 
     def load_conversation(self):
         """Shows saved conversations and lets the user pick one to load."""
         if not os.path.exists(self.save_dir):
-            self.console.print(f"  [{self.theme['warning']}]No saved conversations found.[/{self.theme['warning']}]")
+            self._print_warning("No saved conversations found.")
             return
 
         files = sorted(
@@ -56,7 +94,7 @@ class StorageMixin:
         )
 
         if not files:
-            self.console.print(f"  [{self.theme['warning']}]No saved conversations found.[/{self.theme['warning']}]")
+            self._print_warning("No saved conversations found.")
             return
 
         table = Table(title="Saved Conversations", show_header=True, header_style=f"bold {self.theme['success']}")
@@ -74,7 +112,7 @@ class StorageMixin:
                 model = data.get("model", "Unknown")
                 table.add_row(str(i), filename, model, str(msg_count))
             except Exception:
-                table.add_row(str(i), filename, "?", "?")
+                table.add_row(str(i), filename + " [red](corrupted)[/red]", "?", "?")
 
         self.console.print()
         self.console.print(table)
@@ -89,8 +127,12 @@ class StorageMixin:
             index = int(choice) - 1
             if 0 <= index < len(files):
                 filepath = os.path.join(self.save_dir, files[index])
-                with open(filepath, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+                try:
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                except (json.JSONDecodeError, OSError):
+                    self._print_error(f"Can't load {files[index]}", "This save file is corrupted or unreadable.")
+                    return
 
                 self.conversation = data.get("conversation", [])
                 self.system_prompt = data.get("system_prompt", "")
@@ -120,14 +162,16 @@ class StorageMixin:
                     f"[dim]({msg_count} exchanges restored)[/dim]"
                 )
             else:
-                self.console.print(f"  [{self.theme['error']}]Invalid number.[/{self.theme['error']}]")
+                self._print_error("Invalid number", f"Enter a number between 1 and {len(files)}.")
         except ValueError:
-            self.console.print(f"  [{self.theme['error']}]Please enter a number.[/{self.theme['error']}]")
+            self._print_error("Invalid input", "Please enter a number.")
+
+    # --- MARKDOWN EXPORT ---
 
     def export_conversation(self):
         """Exports the current conversation as a readable Markdown file."""
         if not self.conversation:
-            self.console.print(f"  [{self.theme['warning']}]Nothing to export - conversation is empty.[/{self.theme['warning']}]")
+            self._print_warning("Nothing to export — conversation is empty.")
             return
 
         os.makedirs(self.save_dir, exist_ok=True)
@@ -157,7 +201,11 @@ class StorageMixin:
             lines.append("---")
             lines.append("")
 
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines))
-
-        self.console.print(f"  {self._b('-> Exported to: ' + filename, 'success')}")
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+            self.console.print(f"  {self._b('-> Exported to: ' + filename, 'success')}")
+        except PermissionError:
+            self._print_error("Can't export conversation", "Permission denied — check folder permissions for saved_chats/.")
+        except OSError as e:
+            self._print_error("Can't export conversation", f"Disk may be full or path invalid. Details: {e}")

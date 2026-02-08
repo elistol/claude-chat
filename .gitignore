@@ -2,6 +2,7 @@
 .env
 venv/
 claude-chat/venv/
+nul
 
 # Python
 __pycache__/

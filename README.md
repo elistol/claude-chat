@@ -7,9 +7,6 @@ A feature-rich terminal chatbot powered by Anthropic's Claude API. Built with Py
 ![Platform](https://img.shields.io/badge/Platform-Windows_%7C_macOS_%7C_Linux-lightgrey)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-<!-- Screenshot: main chat view -->
-<!-- ![Claude Chat Banner](screenshots/banner.png) -->
-
 ---
 
 ## Features
@@ -24,6 +21,7 @@ A feature-rich terminal chatbot powered by Anthropic's Claude API. Built with Py
 - **Multi-line input** -- type `"""` to enter multi-line mode for pasting code or writing paragraphs
 - **Smart memory** -- automatically trims oldest messages when approaching the context limit so long chats never crash
 - **File context (`@file`)** -- reference local files in your message so Claude can review, explain, or debug your code
+- **Config persistence** -- your model, brain mode, and theme are remembered between sessions
 
 ### Personas
 - **7 built-in presets** -- Python Tutor, Senior Developer, Concise Mode, Creative Writer, ELI5, Debug Expert, and a default reset
@@ -49,9 +47,7 @@ A feature-rich terminal chatbot powered by Anthropic's Claude API. Built with Py
 - **Styled toolbar** -- always shows your current model, brain mode, theme, and message count
 - **ASCII banner** -- Claude-orange block-character startup art
 - **Animated help** -- live RGB rainbow cycling on the help menu
-
-<!-- Screenshot: theme picker -->
-<!-- ![Themes](screenshots/themes.png) -->
+- **Friendly errors** -- styled error panels with clear hints instead of raw tracebacks
 
 ---
 
@@ -59,20 +55,21 @@ A feature-rich terminal chatbot powered by Anthropic's Claude API. Built with Py
 
 ```
 claude-chat/
-├── my_claude.py        # Entry point
+├── my_claude.py        # Entry point — run this
 ├── .env                # API key (create this yourself)
 ├── .gitignore          # Keeps secrets and junk out of git
 ├── prompts.json        # 170+ autocomplete prompts
 ├── requirements.txt    # pip dependencies
-├── config.json         # Auto-saved user preferences
+├── config.json         # Auto-saved user preferences (auto-created)
 ├── saved_chats/        # Saved conversations (auto-created)
 └── chat/               # Main package
     ├── __init__.py     # Exports ClaudeChat
-    ├── app.py          # Core chatbot class, UI, chat loop
+    ├── app.py          # Core chatbot: setup, pickers, chat engine, main loop
+    ├── display.py      # Banner, animated help panel, error/warning output
     ├── themes.py       # 6 color theme definitions
     ├── completer.py    # Tab autocomplete engine
     ├── voice.py        # Voice input/output (SAPI + SpeechRecognition)
-    ├── storage.py      # Save/load conversations
+    ├── storage.py      # Config persistence, save/load conversations, export
     └── web.py          # DuckDuckGo web search
 ```
 
@@ -142,9 +139,6 @@ Launch the app and start chatting. Your last model, brain mode, and theme are re
 python my_claude.py
 ```
 
-<!-- Screenshot: startup flow -->
-<!-- ![Startup](screenshots/startup.png) -->
-
 ### Commands
 
 Type any of these magic words as your message:
@@ -200,21 +194,6 @@ Use `voice_settings` to pick a different voice or adjust speed.
 | Speech-to-Text    | [SpeechRecognition](https://github.com/Uberi/speech_recognition) |
 | Text-to-Speech    | Windows SAPI via [pywin32](https://github.com/mhammond/pywin32) |
 | Config            | [python-dotenv](https://github.com/theskumar/python-dotenv)  |
-
----
-
-## Screenshots
-
-> Add your own screenshots to a `screenshots/` folder and uncomment the image tags above.
-
-| View | Description |
-|------|-------------|
-| Startup banner | ASCII art with theme colors |
-| Chat session | Streaming Markdown response |
-| Theme picker | 6 themes to choose from |
-| Web search | DuckDuckGo results table |
-| Token usage | Per-message and session cost |
-| Voice settings | Voice picker with speed control |
 
 ---
 

@@ -52,7 +52,7 @@ class VoiceMixin:
     def do_voice(self):
         """One-shot voice: listens, sends to Claude, speaks the response."""
         if not self.voice_available:
-            self.console.print(f"  [{self.theme['error']}]Voice not available. Requires Windows with pywin32 and SpeechRecognition.[/{self.theme['error']}]")
+            self._print_error("Voice not available", "Requires Windows with pywin32 and SpeechRecognition installed.")
             return
 
         self.console.print(f"  {self._c('Voice (' + self._voice_name(self.current_voice_index) + ')', 'accent')}")
@@ -64,7 +64,7 @@ class VoiceMixin:
     def pick_voice(self):
         """Lets the user pick a TTS voice and adjust speed."""
         if not self.voice_available:
-            self.console.print(f"  [{self.theme['error']}]Voice not available. Requires Windows with pywin32 and SpeechRecognition.[/{self.theme['error']}]")
+            self._print_error("Voice not available", "Requires Windows with pywin32 and SpeechRecognition installed.")
             return
 
         p = self.theme["primary"]
@@ -130,7 +130,7 @@ class VoiceMixin:
             self.console.print(f"\n  [{self.theme['warning']}]Could not understand. Try again or type your message.[/{self.theme['warning']}]")
             return None
         except sr.RequestError as e:
-            self.console.print(f"\n  [{self.theme['error']}]Speech service error: {e}[/{self.theme['error']}]")
+            self._print_error("Speech service error", "Google speech recognition is unavailable. Check your internet connection.")
             return None
 
     def speak(self, text):

@@ -10,7 +10,10 @@
       "Bash(\"claude-chat\\\\venv\\\\Scripts\\\\python.exe\" -c \"import my_claude; print\\(''OK''\\)\")",
       "Bash(\"claude-chat\\\\venv\\\\Scripts\\\\python.exe\" -c \"from chat.app import ClaudeChat; print\\(''Import OK''\\)\")",
       "Bash(powershell:*)",
-      "Bash(git --version:*)"
+      "Bash(git --version:*)",
+      "Bash(python -c:*)",
+      "Bash(for f in chat/app.py chat/display.py chat/storage.py chat/voice.py chat/web.py chat/themes.py chat/completer.py)",
+      "Bash(done)"
     ]
   }
 }
