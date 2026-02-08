@@ -1,0 +1,18 @@
+# Environment
+.env
+venv/
+claude-chat/venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# App data
+saved_chats/
+config.json
+
+# IDE
+.vscode/
+.idea/
+*.swp

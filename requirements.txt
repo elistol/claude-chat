@@ -1,0 +1,7 @@
+anthropic
+python-dotenv
+rich
+prompt_toolkit
+duckduckgo-search
+SpeechRecognition
+pywin32

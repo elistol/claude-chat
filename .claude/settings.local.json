@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -NoProfile -Command:*)",
+      "Bash(dir:*)",
+      "Bash(where:*)",
+      "Bash(\"claude-chat\\\\venv\\\\Scripts\\\\python.exe\":*)",
+      "Bash(\"claude-chat\\\\venv\\\\Scripts\\\\python.exe\" -c:*)",
+      "Bash(\"claude-chat\\\\venv\\\\Scripts\\\\pip.exe\" install:*)",
+      "Bash(\"claude-chat\\\\venv\\\\Scripts\\\\python.exe\" -c \"import my_claude; print\\(''OK''\\)\")",
+      "Bash(\"claude-chat\\\\venv\\\\Scripts\\\\python.exe\" -c \"from chat.app import ClaudeChat; print\\(''Import OK''\\)\")",
+      "Bash(powershell:*)",
+      "Bash(git --version:*)"
+    ]
+  }
+}
